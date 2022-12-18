@@ -27,5 +27,22 @@ Google Drive是一個檔案儲存同步服務，因此，使用者儲存資料�
    4-3)Metadata database: 將DB和Web server分離，避免single point of failure
    4-4)File storage: 為保證可用性和持久性，將資料複製到兩個不同的區域
 (5)同步衝突
-   5-1)當多個使用者同時更新檔案時所產生的更新衝突
-   5-2)
+   當多個使用者同時更新檔案時所產生的更新衝突
+(6)系統架構
+   6-1) Users-->Block Server-->Cloud Storage-->Cold Storage
+        Users-->Block Server-->Cloud Storage-->Load Balancer-->API Servers-->...
+   6-2) Users-->Load Balancer-->API Server-->Metadata Cache
+        Users-->Load Balancer-->API Server-->Metadata Database
+        Users-->Load Balancer-->API Server-->Notification Service-->Offline Backup Queue
+   6-3) Users-->Notification Service(Long Polling) --> Offline backup Queue
+   6-4) 名詞解釋
+        1)Block server: 上傳Block data到Cloud Storage
+        2)一個檔案被切割成不同的Block，各自有不同的hash值，hash值儲存在Metadata DB，Block則被視為是獨立的Object，儲存在S3
+        3)以Dropbox為例，一個block是4MB
+        4)檔案被切割成較小的Block儲存在Cloud Storage
+        5)Cold Storage是儲存較冷門的資料
+        6)Notification服務用來通知使用者檔案有增加/修改/移除
+        7)離線備份儲存Queue:當使用者離線時，檔案更新資訊被儲存在QUUEUE中，當使用者上線在時，再告知使用者。
+(7)Block Server
+   7-1)Delta sync
+   7-2)壓縮
