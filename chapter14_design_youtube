@@ -1,0 +1,107 @@
+(1)產品需求:
+   - 上傳影片，觀看影片
+   - 支援終端平台: 手機APP，網頁瀏覽器，智慧型電視
+   - 每天活躍使用者: 約5M
+   - 平均觀看時間: 30分鐘
+   - 支援國際使用者: 支援多語系
+   - 影片解析度: 最多影片解析度和格式
+   - 支援編碼
+   - 檔案大小: 影片最大1GB
+   - 是否利用現存雲端架構?
+(2)系統規格:
+   - 一天5M DAU
+   - 使用者每天約看5個影片
+   - 10%使用者每天上傳一個影片
+   - 平均影片SIZE是300MB
+   - 每天增加儲存量是5M*10%*300MB=150TB
+   - CDN成本: 以AWS CDN為例，每GB平均成本是$0.02，5M*5影片*0.3GB*$0.02=$150000/天。
+              (Content Delivery Network或Content Distribution Network，縮寫：CDN）是指一種透過網際網路互相連接的電腦網路系統，
+              利用最靠近每位使用者的伺服器，更快、更可靠地將音樂、圖片、影片、應用程式及其他檔案傳送給使用者，
+              來提供高效能、可擴展性及低成本的網路內容傳遞給使用者。
+   - 自己建設的成本 - 耗時+維護費用
+   - 系統組成: 終端機+CDN+API伺服器
+(3)影片上傳流程
+   - 使用者上傳影片->本地儲存->轉碼伺服器(Raw data)->轉碼儲存->CDN
+   - 使用者上傳影片->本地儲存->轉碼伺服器(Metadata)->Completion QUEUE -> Completion處理器(類似kafka持續PULL從Queue中抓資料，Streaming) -> Metadata DB->API伺服器
+(4)影片串流流程
+   - 常見串流協定: MPEG-DASH，App HLS，Microsoft Smooth Streaming，Adobe HTTP Dynamic Streaming
+   - 影片直接從CDN被串流傳送，靠近使用者端的Edge Server會以較低的延遲傳送影片
+(5)影片轉碼(Transcoding)
+   5-1)影片須以合適的bitrate和格式來編碼，bitrate越高，影片品質越好，相對也需較大的處理功耗跟較快的網路速度。
+   5-2)Raw data需消耗較大的儲存空間，一個影片長度1小時且以60fps編碼的影片約需要幾百GB的空間。
+   5-3)傳送高解析度的影片需消耗高頻寬
+   5-4)須根據使用者終端機設備來考量如何保持QOE
+   5-5)編碼格式通常包含Container和Codes
+         1)Container是影片檔案，聲音和Metadata，如.avi, .mov, .mp4
+         2)Codes是壓縮和解壓縮的演算法，如H.264，VP9和HEVC
+   5-6)Directed acylic graph(DAG)model的方式來支援多個影片處理流程和高並行性
+       原始影片分為影像，聲音，Metadata三個部分
+       5-1)影像:需要Inspection(檢查)，Video transcoding(360p.mp4,408p.mp4,..1080p.mp4)，Thumbnail(縮小視圖)，...，Watermark等流程-->再和聲音會總
+       5-2)聲音:聲音編碼->再和影像彙總
+       5-3)Metadata
+   5-7)影片轉碼架構
+       5-1)轉碼流程
+           5-1-1)預處理器-->暫時儲存器
+           5-1-2)預處理器-->DAG排程器-->資源管理者-->Task Worker-->暫時儲存器
+           5-1-3)預處理器-->DAG排程器-->資源管理者-->Task Worker-->已編碼的影片
+       5-2)預處理器負責
+           5-2-1)影片分割，影片切割成較小的Group of Pictures(GOP)
+           5-2-2)舊格式終端機格式對齊
+           5-2-3)DAG產生
+           5-2-4)Cache Data
+       5-3)DAG排程器
+           5-3-1)原始影片-->影像(Stage1)-->影像編碼(Stage2)
+           5-3-2)原始影片-->聲音(Stage1)-->聲音編碼(Stage2)
+           5-3-3)原始影片-->Metadata
+       5-4)資源管理者
+           5-4-1)Task Queue: Task優先權處理
+           5-4-2)Worker Queue: 工作利用率資訊優先權
+           5-4-3)Running Queue: 最佳化任務/工作，指示選擇的任務工作者執行工作
+       5-5)Task workers
+           根據DAG指定的任務執行TASK
+       5-6)暫時儲存: 可根據資料型態，資料大小，存取頻率，資料生命周期等選擇合適的儲存系統
+   5-8)編碼影片
+(6)系統最佳化
+   6-1)影片上傳平行化，將影片以GOP切割
+   6-2)上傳資料中心(CDN)靠近使用者
+   6-3)每個流程都平行化
+   6-4)安全最佳化: presigned上傳URL給授權使用者使用
+       Presigned Url : 提供權限來使用私人(private)物件，在時限內可以上傳或下載物件
+       6-4-1) 使用者上傳影片到API Server-->API Server給予一個pre-signed URL給使用者-->使用者上傳影片到AWS S3
+   6-5)安全最佳化: 保護影片
+       6-5-1)Digital rights management(DRM)系統，如Apple FairPlay，Google Widevine，和Microsoft PlayReady
+       6-5-2)AES加密
+       6-5-3)視覺化浮水印
+   6-6)成本最佳化
+       6-6-1)只把最受歡迎的影片放CDN，其他放自己的資料中心
+       6-6-2)冷門的影片不需要儲存不同影片編碼的版本，短視頻即時編碼就可以了
+       6-6-3)區域型受歡迎的影片，不須分布到其他區域
+       6-6-4)和合作的ISP來建立自己的CDN
+   6-7)錯誤處理
+       6-7-1)可恢復的錯誤: 如部分影片格式毀損，可先將影片暫時儲存一段時間，待任務完成再移除。
+       6-7-2)不可回復的錯誤: 如錯誤的影片格式，系統停止任務，並回傳錯誤給使用者。
+       6-7-3)典型的錯誤: 
+             - 上傳錯誤: Retry
+             - 影片切割錯誤: Stop
+             - 編碼錯誤: Retry
+             - 預處理錯誤: Regenere DAG
+             - DAG排程錯誤: Reschedule tasks
+             - 資源管理QUEUE停擺: Use Replicas
+             - Task Worker停擺: Retry task on a new worker
+             - API Server停機: Redirect to a different API server
+             - Metadata cache server停機: Bring up a new cache server
+             - Metadata DB server停機:
+               * Master: Promote a slave to act as the new master
+               * Slave: Use another slave for reads and bring up another database server to replace the dead one
+    6-8)Wrap up
+        6-8-1) Scale the API tier --> HPA
+        6-8-2) Scale the database --> Database replication and shading
+        6-8-3) Live streaming: 影片被記錄和即時被廣播的過程
+               (1)有很高的延遲要求，需要不同的串流協定
+               (2)較低平行化的需求，因為很多資料碎片以即時處理
+               (3)需要不同組合的錯誤處理，因為無法接受較高時間的錯誤處理方式
+        6-8-4) Video taskdowns
+        
+
+       
+   
